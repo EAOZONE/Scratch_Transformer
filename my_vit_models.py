@@ -4,171 +4,181 @@ import torch.nn.functional as F
 
 
 class PatchEmbedding(nn.Module):
-    """Splits the image into patches and embeds them."""
+    """Splits a 2D image into patches and embeds them into a higher-dimensional space."""
 
     def __init__(self, in_channels, patch_size, embed_dim):
         super(PatchEmbedding, self).__init__()
         self.patch_size = patch_size
-        # Applies a 2D convolution over an input signal composed of several input planes.
+        # Applies a 2D convolution to create patches from the input image
         self.projection = nn.Conv2d(
-            in_channels,  # number of features being passed in.
-            embed_dim,  # number of kernels being used
-            kernel_size=patch_size,  # the size of the kernel.
-            stride=patch_size)  # controls the stride for the cross-correlation
-        # Flattens a contiguous range of dims into a tensor
+            in_channels,  # Number of input channels (e.g., RGB)
+            embed_dim,  # Number of output channels (embedding dimension)
+            kernel_size=patch_size,  # Size of the patch
+            stride=patch_size)  # Stride equal to patch size to ensure non-overlapping patches
+        # Flattens the output into a 2D tensor for further processing
         self.flatten = nn.Flatten(2)
 
     def forward(self, x):
         """
-        x: Tensor of shape [B, C, H, W]
+        x: Tensor of shape [B, C, H, W] where B is batch size, C is channels, H is height, W is width
         """
-        # computes the 2D convolution for the input of x
+        # Apply convolution to create patches
         x = self.projection(x)
-        # flattens and transposes the input
+        # Flatten and transpose the output to prepare for transformer input
         x = self.flatten(x).transpose(1, 2)
         return x
 
 
 class PatchEmbedding3D(nn.Module):
-    """Splits the 3D volume into patches and embeds them."""
+    """Splits a 3D image into patches and embeds them into a higher-dimensional space."""
 
     def __init__(self, in_channels, patch_size, embed_dim):
         super(PatchEmbedding3D, self).__init__()
         self.patch_size = patch_size
+        # Applies a 3D convolution to create patches from the input 3D data
         self.projection = nn.Conv3d(in_channels, embed_dim, kernel_size=patch_size, stride=patch_size)
+        # Flattens the output into a 2D tensor for further processing
         self.flatten = nn.Flatten(2)
 
     def forward(self, x):
         """
-        x: Tensor of shape [B, C, D, H, W]
+        x: Tensor of shape [B, C, D, H, W] where D is depth
         """
+        # Apply convolution to create patches
         x = self.projection(x)
+        # Flatten and transpose the output to prepare for transformer input
         x = self.flatten(x).transpose(1, 2)
         return x
 
 
 class PositionalEncoding(nn.Module):
-    """Positional Encoding for tokens to retain spatial information."""
+    """Adds positional encoding to the tokens to retain spatial information in 2D data."""
 
     def __init__(self, num_patches, embed_dim):
         super(PositionalEncoding, self).__init__()
-        # Define the positional encoding, that will enable the model to effectively process the spatial information
+        # Initialize positional encoding parameters
         self.position_encoding = nn.Parameter(torch.randn(1, num_patches, embed_dim))
 
     def forward(self, x):
         """
-        x: Tensor of shape [B, N, embed_dim]
+        x: Tensor of shape [B, N, embed_dim] where N is the number of patches
         """
-        # Combine the tensor input and position_encoding
+        # Add positional encoding to the input tokens
         return x + self.position_encoding
 
 
 class PositionalEncoding3D(nn.Module):
-    """Positional Encoding for 3D tokens to retain spatial information."""
+    """Adds positional encoding to the tokens to retain spatial information in 3D data."""
 
     def __init__(self, num_patches, embed_dim):
         super(PositionalEncoding3D, self).__init__()
+        # Initialize positional encoding parameters
         self.position_encoding = nn.Parameter(torch.randn(1, num_patches, embed_dim))
 
     def forward(self, x):
+        # Add positional encoding to the input tokens
         return x + self.position_encoding
 
 
 class MultiHeadSelfAttention(nn.Module):
-    """"Multi-Head Self-Attention Mechanism."""
+    """Implements the Multi-Head Self-Attention mechanism used in transformers."""
 
     def __init__(self, embed_dim, num_heads):
         super(MultiHeadSelfAttention, self).__init__()
 
         self.num_heads = num_heads
-        self.head_dim = embed_dim // num_heads
-        self.scale = self.head_dim ** -0.5
-        # Calculates the query (Q), key (K) and value (V) into three vectors
+        self.head_dim = embed_dim // num_heads  # Dimension of each attention head
+        self.scale = self.head_dim ** -0.5  # Scaling factor for attention scores
+        # Linear layer to compute query, key, and value vectors
         self.qkv = nn.Linear(embed_dim, embed_dim * 3)
-        # Creates a linear network for output at end
+        # Linear layer for output projection
         self.projection = nn.Linear(embed_dim, embed_dim)
 
     def forward(self, x):
         """
         x: Tensor of shape [B, N, embed_dim]
         """
-        B, N, E = x.shape
+        B, N, E = x.shape  # B: batch size, N: number of tokens, E: embedding dimension
+        # Compute Q, K, V matrices
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
         q, k, v = qkv[0], qkv[1], qkv[2]
-        # Scale the dot product of the QKV
-        attn = (q @ k.transpose(-2, -1)) * self.scale
-        # Calculate the softmax of the attention
+        # Compute scaled dot-product attention
+        attn = (q @ k.transpose(- 2, -1)) * self.scale
+        # Apply softmax to get attention weights
         attn = F.softmax(attn, dim=-1)
-        # Calculate matrix multiplication between the attention and value tensor and transpose and reshape respectively
+        # Compute the output by applying attention weights to the value vectors
         out = (attn @ v).transpose(1, 2).reshape(B, N, E)
-        # Output is passed through a linear network to get the output
+        # Project the output back to the original embedding dimension
         return self.projection(out)
 
 
 class TransformerEncoderLayer(nn.Module):
-    """Single Transformer Encoder Layer."""
+    """Defines a single layer of the Transformer encoder, consisting of multi-head self-attention and feed-forward networks."""
 
     def __init__(self, embed_dim, num_heads, mlp_dim, dropout=0.1):
         super(TransformerEncoderLayer, self).__init__()
-        # Gets the MultiHeadSelfAttention calculation using embed_dim and num_heads
+        # Multi-head self-attention layer
         self.attn = MultiHeadSelfAttention(embed_dim, num_heads)
-        # Applies Layer Normalization over a mini-batch of inputs.
+        # Layer normalization applied before the attention and feed-forward networks
         self.ln1 = nn.LayerNorm(embed_dim)
-        # Using Sequential to create a small model.
+        # Feed-forward network with two linear layers and GELU activation
         self.mlp = nn.Sequential(
             nn.Linear(embed_dim, mlp_dim),
             nn.GELU(),
             nn.Linear(mlp_dim, embed_dim)
         )
-        # Makes another Layer Normalization with the same inputs
+        # Layer normalization applied after the feed-forward network
         self.ln2 = nn.LayerNorm(embed_dim)
-        # Gets dropout to randomly during training zero out some of the input tensor with probability
+        # Dropout layer for regularization
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
         """
         x: Tensor of shape [B, N, embed_dim]
         """
-        # Combines the input with the dropout of the MultiHeadSelfAttention with input of the first layer norm
+        # Apply multi-head self-attention and add residual connection
         x = x + self.dropout(self.attn(self.ln1(x)))
-        # Adds the second layer norm input in a sequential model using dropout
+        # Apply feed-forward network and add residual connection
         x = x + self.dropout(self.mlp(self.ln2(x)))
         return x
 
 
 class MyVIT2D(nn.Module):
+    """Defines a Vision Transformer model for 2D image classification."""
+
     def __init__(self, img_size=224, patch_size=16, in_channels=3, embed_dim=768, num_heads=8,
                  mlp_dim=2048, depth=12, num_classes=None):
         super(MyVIT2D, self).__init__()
-        assert img_size % patch_size == 0
+        assert img_size % patch_size == 0  # Ensure the image size is divisible by the patch size
 
-        self.num_patches = (img_size // patch_size) ** 2
-        # initializes PatchEmbedding and PositionalEncoding
+        self.num_patches = (img_size // patch_size) ** 2  # Calculate the number of patches
+        # Initialize patch embedding and positional encoding layers
         self.patch_embed = PatchEmbedding(in_channels, patch_size, embed_dim)
         self.pos_encoding = PositionalEncoding(self.num_patches, embed_dim)
 
-        # Puts the TransformerEncoderLayer in the PyTorch Neural Network Module List
+        # Create a list of transformer encoder layers
         self.transformer = nn.ModuleList([TransformerEncoderLayer(embed_dim, num_heads, mlp_dim) for _ in range(depth)])
-        # Applies Layer Normalization over a mini-batch of inputs.
+        # Layer normalization applied before the final classification
         self.ln = nn.LayerNorm(embed_dim)
-        # Makes a linear transformation of the embedded data and number of classes
+        # Linear layer for classification if num_classes is specified
         self.classifier = nn.Linear(embed_dim, num_classes) if num_classes else None
 
     def forward(self, x):
         """
         x: Tensor of shape [B, C, H, W]
         """
-        # Use the tensor input in the patch_embed and pos_encoding
+        # Embed patches and add positional encoding
         x = self.patch_embed(x)
         x = self.pos_encoding(x)
 
-        # for every transformer put in the module list the tensor gains another layer
+        # Pass through each transformer layer
         for layer in self.transformer:
             x = layer(x)
-        # uses the layer normalization on the tensor
+        # Apply layer normalization
         x = self.ln(x)
 
         if self.classifier:
+            # Average pooling over the sequence of tokens and apply classifier
             x = x.mean(dim=1)
             x = self.classifier(x)
 
@@ -176,40 +186,42 @@ class MyVIT2D(nn.Module):
 
 
 class MyVIT3D(nn.Module):
+    """Defines a Vision Transformer model for 3D data classification."""
+
     def __init__(self, img_size=(224, 224, 32), patch_size=16, in_channels=3, embed_dim=768, num_heads=8,
                  mlp_dim=2048, depth=12, num_classes=None):
         super(MyVIT3D, self).__init__()
-        assert all(size % patch_size == 0 for size in img_size)
+        assert all(size % patch_size == 0 for size in img_size)  # Ensure all dimensions are divisible by patch size
 
         self.num_patches = (img_size[0] // patch_size) * (img_size[1] // patch_size) * (img_size[2] // patch_size)
-        # initializes PatchEmbedding3D and PositionalEncoding3D
+        # Initialize patch embedding and positional encoding layers for 3D data
         self.patch_embed = PatchEmbedding3D(in_channels, patch_size, embed_dim)
         self.pos_encoding = PositionalEncoding3D(self.num_patches, embed_dim)
 
-        # Puts the TransformerEncoderLayer in the PyTorch Neural Network Module List
-        self.transformer = nn.ModuleList([TransformerEncoderLayer(embed_dim, num_heads, mlp_dim) for _ in range(depth)])
-
-        # Applies Layer Normalization over a mini-batch of inputs.
+        # Create a list of transformer encoder layers
+        self.transformer = nn.ModuleList([TransformerEncoderLayer(embed_dim, num_heads , mlp_dim) for _ in range(depth)])
+        # Layer normalization applied before the final classification
         self.ln = nn.LayerNorm(embed_dim)
-        # Makes a linear transformation of the embedded data and number of classes
+        # Linear layer for classification if num_classes is specified
         self.classifier = nn.Linear(embed_dim, num_classes) if num_classes else None
 
     def forward(self, x):
         """
-        x: Tensor of shape [B, C, H, W, D]
+        x: Tensor of shape [B, C, D, H, W]
         """
-        # Use the tensor input in the patch_embed and pos_encoding
+        # Embed patches and add positional encoding
         x = self.patch_embed(x)
         x = self.pos_encoding(x)
 
-        # for every transformer put in the module list the tensor gains another layer
+        # Pass through each transformer layer
         for layer in self.transformer:
             x = layer(x)
 
-        # uses the layer normalization on the tensor
+        # Apply layer normalization
         x = self.ln(x)
 
         if self.classifier:
+            # Average pooling over the sequence of tokens and apply classifier
             x = x.mean(dim=1)
             x = self.classifier(x)
 
@@ -217,12 +229,14 @@ class MyVIT3D(nn.Module):
 
 
 class PatchEmbedding4D(nn.Module):
+    """Splits a 4D image into patches and embeds them into a higher-dimensional space."""
+
     def __init__(self, in_channels=3, patch_size=(16, 16, 4, 2), embed_dim=768):
         super(PatchEmbedding4D, self).__init__()
         self.patch_size = patch_size
         self.in_channels = in_channels
         self.embed_dim = embed_dim
-        # Adjust kernel_size and stride to handle new depth*time dimension
+        # Applies a 3D convolution to create patches from the input 4D data
         self.projection = nn.Conv3d(
             in_channels,
             embed_dim,
@@ -236,19 +250,26 @@ class PatchEmbedding4D(nn.Module):
 
         # Now perform projection
         x = self.projection(x)
+        # Flatten and transpose the output to prepare for transformer input
         x = x.flatten(2)
         x = x.transpose(1, 2)
         return x
 
 
 class MyVIT4D(nn.Module):
+    """Defines a Vision Transformer model for 4D data classification."""
+
     def __init__(self, img_size=(224, 224, 32, 4), patch_size=(16, 16, 4, 2), in_channels=3, embed_dim=768, num_heads=8,
                  mlp_dim=2048, depth=12, num_classes=None):
         super(MyVIT4D, self).__init__()
 
+        # Initialize patch embedding for 4D data
         self.patch_embedding = PatchEmbedding4D(in_channels, patch_size, embed_dim)
+        # Class token for classification
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
+        # Layer normalization applied before the final classification
         self.layer_norm = nn.LayerNorm(embed_dim)
+        # Transformer encoder for processing the embedded patches
         self.transformer = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(
                 d_model=embed_dim,
@@ -259,17 +280,20 @@ class MyVIT4D(nn.Module):
             num_layers=depth
         )
 
+        # Linear layer for classification if num_classes is specified
         self.head = nn.Linear(embed_dim, num_classes) if num_classes is not None else nn.Identity()
 
     def forward(self, x):
+        # Embed patches and add class token
         x = self.patch_embedding(x)
-        cls_tokens = self.cls_token.expand(x.shape[0], -1, -1)
-        x = torch.cat((cls_tokens, x), dim=1)
-        x = self.layer_norm(x)
-        x = self.transformer(x)
-        cls_token_final = x[:, 0]
+        cls_tokens = self.cls_token.expand(x.shape[0], -1, -1)  # Expand class token for batch size
+        x = torch.cat((cls_tokens, x), dim=1)  # Concatenate class token with embedded patches
+        x = self.layer_norm(x)  # Apply layer normalization
+        x = self.transformer(x)  # Pass through transformer encoder
+        cls_token_final = x[:, 0]  # Extract the class token output
 
         if self.head:
+            # Apply classifier to the class token output
             x = self.head(cls_token_final)
 
         return x

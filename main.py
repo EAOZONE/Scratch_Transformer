@@ -56,7 +56,3 @@ with autocast('cuda'):
 # Backward pass for 4D model
 scaler.scale(loss4d).backward()
 print("4D Loss computed:", loss4d.item())
-
-# Step the optimizer (if you have one defined)
-# optimizer.step()
-# scaler.update()

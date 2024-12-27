@@ -229,71 +229,63 @@ class MyVIT3D(nn.Module):
 
 
 class PatchEmbedding4D(nn.Module):
-    """Splits a 4D image into patches and embeds them into a higher-dimensional space."""
-
-    def __init__(self, in_channels=3, patch_size=(16, 16, 4, 2), embed_dim=768):
+    def __init__(self, in_channels=3, spatial_patch_size=(16, 16), temporal_patch_size=4, embed_dim=768):
         super(PatchEmbedding4D, self).__init__()
-        self.patch_size = patch_size
         self.in_channels = in_channels
+        self.spatial_patch_size = spatial_patch_size
+        self.temporal_patch_size = temporal_patch_size
         self.embed_dim = embed_dim
-        # Applies a 3D convolution to create patches from the input 4D data
+
+        # 3D convolution
         self.projection = nn.Conv3d(
             in_channels,
             embed_dim,
-            kernel_size=(patch_size[0], patch_size[1], patch_size[2] * patch_size[3]),
-            stride=(patch_size[0], patch_size[1], patch_size[2] * patch_size[3])
+            kernel_size=(self.temporal_patch_size, *self.spatial_patch_size),
+            stride=(self.temporal_patch_size, *self.spatial_patch_size)
         )
 
     def forward(self, x):
-        # Reshape input from [B, C, H, W, D, T] to [B, C, H, W, D*T]
-        x = x.view(x.size(0), x.size(1), x.size(2), x.size(3), -1)
-
-        # Now perform projection
+        b, c, h, w, d, t = x.shape
+        # Reshape to treat temporal dimension as part of the batch dimension
+        x = x.view(b * t, c, h, w, d)
+        # Apply 3D convolution to each temporal slice
         x = self.projection(x)
-        # Flatten and transpose the output to prepare for transformer input
+        # Flattening the features
         x = x.flatten(2)
         x = x.transpose(1, 2)
+        # Reshape back to separate the temporal dimension
+        x = x.view(b, t, -1, self.embed_dim)
         return x
 
 
 class MyVIT4D(nn.Module):
-    """Defines a Vision Transformer model for 4D data classification."""
-
-    def __init__(self, img_size=(224, 224, 32, 4), patch_size=(16, 16, 4, 2), in_channels=3, embed_dim=768, num_heads=8,
-                 mlp_dim=2048, depth=12, num_classes=None):
+    def __init__(self, in_channels=3, patch_size=(16, 16, 4), embed_dim=768):
         super(MyVIT4D, self).__init__()
 
-        # Initialize patch embedding for 4D data
-        self.patch_embedding = PatchEmbedding4D(in_channels, patch_size, embed_dim)
-        # Class token for classification
+        self.patch_embedding = PatchEmbedding4D(in_channels, patch_size[1:], patch_size[0], embed_dim)
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        # Layer normalization applied before the final classification
-        self.layer_norm = nn.LayerNorm(embed_dim)
-        # Transformer encoder for processing the embedded patches
-        self.transformer = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(
-                d_model=embed_dim,
-                nhead=num_heads,
-                dim_feedforward=mlp_dim,
-                batch_first=True
-            ),
-            num_layers=depth
-        )
 
-        # Linear layer for classification if num_classes is specified
-        self.head = nn.Linear(embed_dim, num_classes) if num_classes is not None else nn.Identity()
+        # Adjust the number of patches based on the output shape from PatchEmbedding4D
+        num_patches = ((224 // patch_size[1]) * (224 // patch_size[2])) * (
+                    32 // patch_size[0])  # Assuming fixed dimensions of input
+
+        self.pos_encoding = nn.Parameter(torch.randn(1, num_patches + 1, embed_dim))
+        self.transformer = nn.TransformerEncoder(nn.TransformerEncoderLayer(d_model=embed_dim, nhead=8, batch_first=True), num_layers=6)
+        self.layer_norm = nn.LayerNorm(embed_dim)
 
     def forward(self, x):
-        # Embed patches and add class token
+        # Embed patches
         x = self.patch_embedding(x)
-        cls_tokens = self.cls_token.expand(x.shape[0], -1, -1)  # Expand class token for batch size
-        x = torch.cat((cls_tokens, x), dim=1)  # Concatenate class token with embedded patches
-        x = self.layer_norm(x)  # Apply layer normalization
-        x = self.transformer(x)  # Pass through transformer encoder
-        cls_token_final = x[:, 0]  # Extract the class token output
+        b, t, n, _ = x.shape
 
-        if self.head:
-            # Apply classifier to the class token output
-            x = self.head(cls_token_final)
+        # Include the class token
+        cls_tokens = self.cls_token.expand(b, t, -1, -1)
+        x = torch.cat((cls_tokens, x), dim=2)
+        x = x.mean(dim=1)  # Aggregating over the temporal dimension
+
+        # Add position encoding
+        x += self.pos_encoding[:, :(n + 1)]
+        x = self.transformer(x)
+        x = self.layer_norm(x[:, 0])
 
         return x

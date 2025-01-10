@@ -262,16 +262,19 @@ class MyVIT4D(nn.Module):
     def __init__(self, in_channels=3, patch_size=(16, 16, 4), embed_dim=768):
         super(MyVIT4D, self).__init__()
 
-        self.patch_embedding = PatchEmbedding4D(in_channels, patch_size[1:], patch_size[0], embed_dim)
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
 
         # Adjust the number of patches based on the output shape from PatchEmbedding4D
         num_patches = ((224 // patch_size[1]) * (224 // patch_size[2])) * (
                     32 // patch_size[0])  # Assuming fixed dimensions of input
-
+        # Initialize patch embedding and positional encoding layers for 4D data
+        self.patch_embedding = PatchEmbedding4D(in_channels, patch_size[1:], patch_size[0], embed_dim)
         self.pos_encoding = nn.Parameter(torch.randn(1, num_patches + 1, embed_dim))
-        self.transformer = nn.TransformerEncoder(nn.TransformerEncoderLayer(d_model=embed_dim, nhead=8, batch_first=True), num_layers=6)
-        self.layer_norm = nn.LayerNorm(embed_dim)
+
+        # Create a list of transformer encoder layers
+        self.transformer = nn.ModuleList([TransformerEncoderLayer(embed_dim, 8, 2048) for _ in range(6)])
+        # Linear layer for classification if num_classes is specified
+        self.ln = nn.LayerNorm(embed_dim)
 
     def forward(self, x):
         # Embed patches
@@ -285,7 +288,10 @@ class MyVIT4D(nn.Module):
 
         # Add position encoding
         x += self.pos_encoding[:, :(n + 1)]
-        x = self.transformer(x)
-        x = self.layer_norm(x[:, 0])
+        # Pass through each transformer layer
+        for layer in self.transformer:
+            x = layer(x)
+        # Apply layer normalization
+        x = self.ln(x[:, 0])
 
         return x

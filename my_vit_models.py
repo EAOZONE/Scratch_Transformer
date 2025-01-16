@@ -146,12 +146,12 @@ class TransformerEncoderLayer(nn.Module):
 class MyVIT2D(nn.Module):
     """Defines a Vision Transformer model for 2D image classification."""
 
-    def __init__(self, img_size=224, patch_size=16, in_channels=3, embed_dim=768, num_heads=8,
+    def __init__(self, img_size=(224, 224), patch_size=16, in_channels=3, embed_dim=768, num_heads=8,
                  mlp_dim=2048, depth=12, num_classes=None):
         super(MyVIT2D, self).__init__()
-        assert img_size % patch_size == 0  # Ensure the image size is divisible by the patch size
+        assert img_size[0] % patch_size == 0 and img_size[1] % patch_size == 0  # Ensure the image size is divisible by the patch size
 
-        self.num_patches = (img_size // patch_size) ** 2  # Calculate the number of patches
+        self.num_patches = (img_size[0] // patch_size) * (img_size[1] // patch_size) # Calculate the number of patches
         # Initialize patch embedding and positional encoding layers
         self.patch_embed = PatchEmbedding(in_channels, patch_size, embed_dim)
         self.pos_encoding = PositionalEncoding(self.num_patches, embed_dim)

@@ -15,7 +15,7 @@ NUM_HEADS = 8
 DEPTH = 6
 MLP_DIM = 2048
 BATCH_SIZE = 8
-EPOCHS = 10
+EPOCHS = 100
 REDUCED_RATIO = 0.2
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -47,7 +47,7 @@ def visualize_image(data, title="Image"):
 
 def file_loader(filepath):
     """file loader function for PyTorch .pth tensor files."""
-    data = torch.load(filepath)
+    data = torch.load(filepath, weights_only=False)
     return data
 
 def main():
@@ -82,26 +82,25 @@ def main():
     criterion = nn.MSELoss()
     scaler = GradScaler()
 
-    for epoch in range(EPOCHS):
-        # Gets a random sample for each epoch training
-        indices = random.sample(range(len(train_dataset)), int(len(train_dataset) * REDUCED_RATIO))
-        epoch_train_dataset = Subset(train_dataset, indices)
-        train_loader = DataLoader(epoch_train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=4,
-                                  pin_memory=True)
+    all_train_indices = list(range(len(train_dataset)))
+    sampled_indices = random.sample(all_train_indices, int(len(train_dataset) * REDUCED_RATIO))
+    sampler = torch.utils.data.SubsetRandomSampler(sampled_indices)
+    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, sampler=sampler, num_workers=4, pin_memory=True)
 
+
+    for epoch in range(EPOCHS):
+        train_loader.sampler.indices = random.sample(all_train_indices, int(len(train_dataset) * REDUCED_RATIO))
         # Trains model on each batch
         model.train()
         optimizer.zero_grad()
         for i, (data, target) in enumerate(train_loader):
-            print(data.shape)
             B, _, H, W, D = data.shape
             data = data.permute(0, 4, 1, 2, 3).reshape(B, D, H, W)
-            print(f"Data Shape: {data.shape}")
-            data, target = data.to(DEVICE).float(), target.to(DEVICE).float()
+            data, target = data.to(DEVICE), target.to(DEVICE, dtype=torch.float32)
 
             target = target.view(-1, 1)
 
-            with autocast(device_type='cuda'):
+            with autocast(device_type='cuda', dtype=torch.float16):
                 output = model(data)
                 loss = criterion(output, target)
 

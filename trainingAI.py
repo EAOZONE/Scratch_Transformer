@@ -16,7 +16,7 @@ NUM_HEADS = 8
 DEPTH = 6
 MLP_DIM = 2048
 BATCH_SIZE = 8
-EPOCHS = 100
+EPOCHS = 10
 REDUCED_RATIO = 0.2
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -104,6 +104,19 @@ def main():
 
         print(f"Epoch {epoch + 1}/{EPOCHS} Loss: {loss.item()}")
 
+    model.eval()
+    total_loss = 0
+    with torch.no_grad():
+        for data, target in data_loader:
+            B, _, H, W, D = data.shape
+            data = data.permute(0, 4, 1, 2, 3).reshape(B, H, W, D)
+            B, _, H, W, D = target.shape
+            target = target.permute(0, 4, 1, 2, 3).reshape(D, H, W, B)
+            data, target = data.to(DEVICE, dtype=torch.float32), target.to(DEVICE, dtype=torch.float32)
+            output = model(data)
+            loss = criterion(output, target)
+            total_loss += loss.item()
+    print(total_loss / len(data_loader))
 
 if __name__ == "__main__":
     main()

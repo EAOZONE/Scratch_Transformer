@@ -29,8 +29,8 @@ class CustomDataset(Dataset):
         return len(self.data_list)
 
     def __getitem__(self, idx):
-        data = torch.load(self.data_list[idx])
-        target = torch.load(self.target_list[idx])
+        data = torch.load(self.data_list[idx], weights_only=False)
+        target = torch.load(self.target_list[idx], weights_only=False)
         data = data.permute(0, 3, 1, 2)  # Permute dimensions to [B, C, H, W]
         return data, target
 
@@ -90,7 +90,7 @@ def main():
             data = data.permute(0, 4, 1, 2, 3).reshape(B, H, W, D)
             B, _, H, W, D = target.shape
             target = target.permute(0, 4, 1, 2, 3).reshape(D, H, W, B)
-            data, target = data.to(DEVICE), target.to(DEVICE, dtype=torch.float32)
+            data, target = data.to(DEVICE, dtype=torch.float32), target.to(DEVICE, dtype=torch.float32)
 
             with autocast(device_type='cuda', dtype=torch.float16):
                 output = model(data)

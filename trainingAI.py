@@ -1,12 +1,13 @@
 import os
 import random
+
+import numpy as np
 import torch
+from matplotlib import pyplot as plt
 from torch import nn, autocast
-from torch.utils.data import random_split, DataLoader, Subset, Dataset
-from torchvision.datasets import DatasetFolder
+from torch.utils.data import DataLoader, Dataset
 from torch.optim import Adam
 from torch.cuda.amp import GradScaler
-import matplotlib.pyplot as plt
 from my_vit_models import MyVIT2D
 
 IMG_SIZE = (900, 600)
@@ -16,7 +17,7 @@ NUM_HEADS = 8
 DEPTH = 6
 MLP_DIM = 2048
 BATCH_SIZE = 8
-EPOCHS = 10
+EPOCHS = 100
 REDUCED_RATIO = 0.2
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -29,9 +30,8 @@ class CustomDataset(Dataset):
         return len(self.data_list)
 
     def __getitem__(self, idx):
-        data = torch.load(self.data_list[idx])
-        target = torch.load(self.target_list[idx])
-        data = data.permute(0, 3, 1, 2)  # Permute dimensions to [B, C, H, W]
+        data = torch.load(self.data_list[idx], weights_only=False)
+        target = torch.load(self.target_list[idx], weights_only=False)
         return data, target
 
 def get_random_files(folder, num_files):
@@ -87,9 +87,9 @@ def main():
         optimizer.zero_grad()
         for i, (data, target) in enumerate(data_loader):
             B, _, H, W, D = data.shape
-            data = data.permute(0, 4, 1, 2, 3).reshape(B, H, W, D)
+            data = data.permute(0, 4, 1, 2, 3).reshape(B, D, H, W)
             B, _, H, W, D = target.shape
-            target = target.permute(0, 4, 1, 2, 3).reshape(D, H, W, B)
+            target = target.permute(0, 4, 1, 2, 3).reshape(B, D, H, W)
             data, target = data.to(DEVICE), target.to(DEVICE, dtype=torch.float32)
 
             with autocast(device_type='cuda', dtype=torch.float16):
@@ -104,14 +104,15 @@ def main():
 
         print(f"Epoch {epoch + 1}/{EPOCHS} Loss: {loss.item()}")
 
+
     model.eval()
     total_loss = 0
     with torch.no_grad():
         for data, target in data_loader:
             B, _, H, W, D = data.shape
-            data = data.permute(0, 4, 1, 2, 3).reshape(B, H, W, D)
+            data = data.permute(0, 4, 1, 2, 3).reshape(B, D, H, W)
             B, _, H, W, D = target.shape
-            target = target.permute(0, 4, 1, 2, 3).reshape(D, H, W, B)
+            target = target.permute(0, 4, 1, 2, 3).reshape(B, D, H, W)
             data, target = data.to(DEVICE, dtype=torch.float32), target.to(DEVICE, dtype=torch.float32)
             output = model(data)
             loss = criterion(output, target)

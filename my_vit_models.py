@@ -146,21 +146,22 @@ class MyVIT2D(nn.Module):
         ])
         self.norm = nn.LayerNorm(embed_dim)
 
-        # Classifier for scalar output (or regression)
-        self.classifier = nn.Linear(embed_dim, 1)
+        self.reconstruction = nn.Linear(embed_dim, in_channels * patch_size[0] * patch_size[1]) # Reconstruct image from embedding
 
     def forward(self, x):
         """
         Input: Tensor of shape [B, C, H, W]
-        Output: Tensor of shape [B] (Scalar predictions)
+        Output: Tensor of shape [B, C, H, W]
         """
+        B, C, H, W = x.shape
         x = self.patch_embedding(x)  # [B, N, embed_dim]
         x = self.positional_encoding(x)  # Add positional information
         for layer in self.encoder_layers:  # Transformer layers
             x = layer(x)
         x = self.norm(x)  # Layer norm
-        x = x.mean(dim=1)  # Global average pooling
-        return self.classifier(x).squeeze(-1)  # Regression scalar output
+        x = self.reconstruction(x)  # Reconstruct image
+        x = x.view(B, C, H, W)  # Reshape to input shape
+        return x
 
 class MyVIT3D(nn.Module):
     """Vision Transformer for 3D data."""

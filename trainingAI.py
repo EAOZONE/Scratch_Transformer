@@ -8,6 +8,7 @@ from torch import nn, autocast
 from torch.utils.data import DataLoader, Dataset
 from torch.optim import Adam
 from torch.cuda.amp import GradScaler
+import matplotlib.pyplot as plt
 from my_vit_models import MyVIT2D
 
 IMG_SIZE = (900, 600)
@@ -103,7 +104,6 @@ def main():
                 optimizer.zero_grad()
 
         print(f"Epoch {epoch + 1}/{EPOCHS} Loss: {loss.item()}")
-
 
     model.eval()
     total_loss = 0
